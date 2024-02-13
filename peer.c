@@ -126,10 +126,34 @@ int main( int argc, char *argv[] )
         }
 
         
-    }else if (strcmp(command, "exit") == 0) {
+    }
+    else if (strcmp(command, "setup-dht") == 0) {
+        char leaderPeerName[MAX_NAME_LENGTH];
+        int n;
+        int year;
+
+        printf("Enter peer name: ");
+        scanf("%49s", leaderPeerName);
+        printf("Enter 'n' value: ");
+        scanf("%d", &n);
+        printf("Enter the year for data: ");
+        scanf("%d", &year);
+        
+        char message[MAX_MESSAGE_SIZE];
+        sprintf(message,"setup-dht %s %d %d", leaderPeerName, n, year);
+
+        printf(message);
+
+        if (sendto(sock, message, strlen(message), 0, (struct sockaddr *)&echoServAddr, sizeof(echoServAddr)) < 0) {
+                perror("sendto failed");
+                exit(1);
+        }
+    }
+    else if (strcmp(command, "exit") == 0) {
         // If the command is "exit"
         exit(0);
-    } else {
+    }
+     else {
         // If the command is invalid
         printf("Invalid command.\n");
     }
