@@ -35,12 +35,26 @@ struct Peer {
     char state[10]; // State of the peer: Free, Leader, InDHT
 };
 
+struct PeerTuple
+{
+    int indentifier;
+    char name[MAX_NAME_LENGTH+1];
+    char ip_address[16];
+    unsigned int p_port;
+};
+
 void DieWithError( const char *errorMessage ) // External error handling function
 {
     perror( errorMessage );
     exit(1);
 }
 
+send_id(const char *peer_name, const char *ip_address, unsigned int peer_port, int indentifier, int ring_size, const char *response)
+{
+    int send_sock;
+    struct sockaddr_in echoPeerAddr;
+    char message[MAX_MESSAGE_SIZE];
+}
 int main( int argc, char *argv[] )
 {
     size_t nread;
@@ -54,9 +68,8 @@ int main( int argc, char *argv[] )
     size_t echoStringLen = ECHOMAX;               // Length of string to echo
     int respStringLen;               // Length of received response
     char echoBuffer[ECHOMAX];
-    //char message[MAX_MESSAGE_SIZE];
+    int n;                           //Size of ring 
 
-    // echoString = (char *) malloc( ECHOMAX );
 
     if (argc < 3)    // Test for correct number of arguments
     {
@@ -129,7 +142,6 @@ int main( int argc, char *argv[] )
     }
     else if (strcmp(command, "setup-dht") == 0) {
         char leaderPeerName[MAX_NAME_LENGTH];
-        int n;
         int year;
 
         printf("Enter peer name: ");
@@ -149,6 +161,10 @@ int main( int argc, char *argv[] )
                 exit(1);
         }
     }
+    else if(strcmp(command, "set-id") == 0)
+    {
+
+    }
     else if (strcmp(command, "exit") == 0) {
         // If the command is "exit"
         exit(0);
@@ -167,6 +183,22 @@ int main( int argc, char *argv[] )
         DieWithError("client: recvfrom() failed");
 
     printf("Received response from server: %s\n", echoBuffer);
+
+    char *token = strtok(echoBuffer, "\n"); //Split the response into lines
+    int i = 1; //Skip the leaders tuple, start from the second line
+    while ((token = strtok(NULL, "\n")) != NULL){
+        char peer_name[MAX_NAME_LENGTH + 1];
+        char ip_address[16];
+        unsigned int p_port;
+
+        //Parse the peer information from the token
+        sscanf(token, "%s %s %u", peer_name, ip_address, &p_port);
+
+        //Send set_id command to peer
+        set_id(peer_name, ip_address, p_port, i, n, echoBuffer);
+
+        i++;
+    }
 
     }
 	// Pass string back and forth between server ITERATIONS times

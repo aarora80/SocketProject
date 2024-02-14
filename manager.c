@@ -69,6 +69,25 @@ int peerExists(char peerName[MAX_NAME_LENGTH])
         return peer_index;
     }
 }
+
+void setRandPeerToDHT(int leader_index, int n)
+{
+    //printf("Leader index: %d\n",leader_index);
+    srand(time(NULL));
+    
+    int selected_count =0;
+
+    while(selected_count < (n-1))
+    {
+        //printf("Entered for loop in rand function\n");
+        int random_index = rand() % num_registered_peers;
+        //printf("random index: %d\n",random_index);
+        if(random_index != leader_index && strcmp(registered_peers[random_index].state, "Free") == 0) {
+            strcpy(registered_peers[random_index].state, "InDHT");
+            selected_count++;
+        }
+    }
+}
     
 
 //register Peer
@@ -210,33 +229,50 @@ int main( int argc, char *argv[] )
 
         printf("Recieved %s %d %d \n", peer_name, n, year);
 
-        if(peerExists(peer_name) > -1)
+        int leaderIndex = peerExists(peer_name);
+
+        if(leaderIndex > -1)
         {
             // printf("I entered the peerexists condition\n");
             // printf("%d\n",(peerExists(peer_name)));
-            printf("%s is leader\n",registered_peers[peerExists(peer_name)].name);
-            continue;
+            printf("%s is leader\n",registered_peers[leaderIndex].name);
         }
         else
         {
             DieWithError("Peer not registered");
         }
 
-        if(n > num_registered_peers || isDHTComplete == 1)
+        if(n > num_registered_peers || isDHTComplete == 1 || n < 3)
         {
             DieWithError("Failure");
         }
 
         strcpy(registered_peers[peerExists(peer_name)].state, "Leader");
 
+        setRandPeerToDHT(leaderIndex, n);
+        
+        print_registered_peers();
 
-        /*
-        printf("Done with generating random peers\n");
-        printf("%s", randomPeersGenerated[0].name);
-        printf("%s", randomPeersGenerated[1].name);
-        printf("%s", randomPeersGenerated[2].name);
-        */
-        sendto(sock, "SUCCESS!", strlen("SUCCESS"), 0, (struct sockaddr *) &echoClntAddr, sizeof(echoClntAddr));
+        char response[MAX_MSG_LENGTH];
+        sprintf(response, "SUCCESS\n%s %s %u\n", registered_peers[leaderIndex].name,
+        registered_peers[leaderIndex].ip_address,registered_peers[leaderIndex].p_port);
+
+        for(int i =0; i < n;i++)
+        {
+            if(i == leaderIndex)
+            {
+                continue;
+            }
+
+            sprintf(response + strlen(response), "%s %s %u\n", registered_peers[i].name,
+            registered_peers[i].ip_address,registered_peers[i].p_port);
+        }
+
+        if(sendto(sock,response,strlen(response),0, 
+        (struct sockaddr*)&echoClntAddr, sizeof(echoClntAddr)) != strlen(response))
+        {
+            DieWithError("Response did not work");
+        }
     }
     else {
         // Handle other types of messages here
