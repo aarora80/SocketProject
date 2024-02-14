@@ -13,7 +13,6 @@
 #include <stdlib.h>     // for atoi() and exit()
 #include <string.h>     // for memset()
 #include <unistd.h>     // for close()
-#include <time.h>       // for rand()
 
 #define ECHOMAX 255     // Longest string to echo
 #define MAX_PEERS 10 // Maximum number of peers that can be registered
@@ -29,13 +28,6 @@ struct Peer {
     char state[10]; // State of the peer: Free, Leader, InDHT
 };
 
-struct PeerTuple
-{
-    char name[MAX_NAME_LENGTH+1];
-    char ip_address[16];
-    unsigned int p_port;
-};
-
 struct Peer registered_peers[MAX_PEERS]; // Array to store registered peers
 int num_registered_peers = 0; // Counter for registered peers
 
@@ -44,51 +36,6 @@ void DieWithError( const char *errorMessage ) // External error handling functio
     perror( errorMessage );
     exit( 1 );
 }
-
-int peerExists(char peerName[MAX_NAME_LENGTH])
-{
-    int peer_index = -1;
-    for(int i=0; i < num_registered_peers; i++)
-    {
-        if(strcmp(registered_peers[i].name, peerName) == 0)
-        {
-            peer_index = i;
-            break;
-        }
-    }
-
-
-    if(peer_index == -1)
-    {
-        return -1;
-    }
-    else
-    {
-        // printf("I entered the return peer index condition\n");
-        // printf("%d\n",peer_index);
-        return peer_index;
-    }
-}
-
-void setRandPeerToDHT(int leader_index, int n)
-{
-    //printf("Leader index: %d\n",leader_index);
-    srand(time(NULL));
-    
-    int selected_count =0;
-
-    while(selected_count < (n-1))
-    {
-        //printf("Entered for loop in rand function\n");
-        int random_index = rand() % num_registered_peers;
-        //printf("random index: %d\n",random_index);
-        if(random_index != leader_index && strcmp(registered_peers[random_index].state, "Free") == 0) {
-            strcpy(registered_peers[random_index].state, "InDHT");
-            selected_count++;
-        }
-    }
-}
-    
 
 //register Peer
 int register_peer(char *peer_name, char *ip_address, unsigned int m_port, unsigned int p_port, struct sockaddr_in echoClntAddr, int sock) {
@@ -160,7 +107,6 @@ int main( int argc, char *argv[] )
     char echoBuffer[ ECHOMAX ];      // Buffer for echo string
     unsigned short echoServPort;     // Server port
     int recvMsgSize;                 // Size of received message
-    int isDHTComplete;               // Check if table is complete 
 
     if( argc != 2 )         // Test for correct number of parameters
     {
@@ -198,14 +144,14 @@ int main( int argc, char *argv[] )
     //printf("server: received string ``%s'' from client on IP address %s\n", echoBuffer, inet_ntoa(echoClntAddr.sin_addr));
 
     // Extract and print peer information
-    if(strncmp(echoBuffer,"register",strlen("register")) == 0){
-    
-        char command[10];
-        char peer_name[MAX_NAME_LENGTH + 1];
-        char ip_address[16];
-        unsigned int m_port, p_port;
-        sscanf(echoBuffer, "%9s %s %s %u %u", command, peer_name, ip_address, &m_port, &p_port);
-    
+    char command[10];
+    char peer_name[MAX_NAME_LENGTH + 1];
+    char ip_address[16];
+    unsigned int m_port, p_port;
+    sscanf(echoBuffer, "%9s %s %s %u %u", command, peer_name, ip_address, &m_port, &p_port);
+
+    // Check message type and process accordingly
+    if (strcmp(command, "register") == 0) {
         printf("Peer information received:\n");
         printf("Command: %s\n", command);
         printf("Name: %s\n", peer_name);
@@ -218,66 +164,42 @@ int main( int argc, char *argv[] )
         } else {
             printf("Failed to register peer.\n");
         }
-    } else if(strncmp(echoBuffer,"setup-dht",strlen("setup-dht")) == 0) 
-    {
-        char command[10];
-        char peer_name[MAX_NAME_LENGTH+1];
-        int n;
-        int year;
+    }else if (strcmp(command, "setup-dht") == 0){
+        char peer_name[MAX_NAME_LENGTH + 1];
+        unsigned int n;
+        unsigned int year;
 
-        sscanf(echoBuffer, "%9s %49s %d %d", command, peer_name, &n, &year);
+        // Extract peer name, n, and year from the message
+        sscanf(echoBuffer, "setup-dht %s %u %u", peer_name, &n, &year);
 
-        printf("Recieved %s %d %d \n", peer_name, n, year);
-
-        int leaderIndex = peerExists(peer_name);
-
-        if(leaderIndex > -1)
-        {
-            // printf("I entered the peerexists condition\n");
-            // printf("%d\n",(peerExists(peer_name)));
-            printf("%s is leader\n",registered_peers[leaderIndex].name);
-        }
-        else
-        {
-            DieWithError("Peer not registered");
-        }
-
-        if(n > num_registered_peers || isDHTComplete == 1 || n < 3)
-        {
-            DieWithError("Failure");
-        }
-
-        strcpy(registered_peers[peerExists(peer_name)].state, "Leader");
-
-        setRandPeerToDHT(leaderIndex, n);
-        
-        print_registered_peers();
-
-        char response[MAX_MSG_LENGTH];
-        sprintf(response, "SUCCESS\n%s %s %u\n", registered_peers[leaderIndex].name,
-        registered_peers[leaderIndex].ip_address,registered_peers[leaderIndex].p_port);
-
-        for(int i =0; i < n;i++)
-        {
-            if(i == leaderIndex)
-            {
-                continue;
+        // Check if peer is registered
+        int peer_index = -1;
+        for (int i = 0; i < num_registered_peers; i++) {
+            if (strcmp(registered_peers[i].name, peer_name) == 0) {
+                peer_index = i;
+                break;
             }
-
-            sprintf(response + strlen(response), "%s %s %u\n", registered_peers[i].name,
-            registered_peers[i].ip_address,registered_peers[i].p_port);
+        }
+        if (peer_index == -1) {
+            // Peer not registered
+            send_failure_response();
+            continue;
         }
 
-        if(sendto(sock,response,strlen(response),0, 
-        (struct sockaddr*)&echoClntAddr, sizeof(echoClntAddr)) != strlen(response))
-        {
-            DieWithError("Response did not work");
+        // Check other conditions (n >= 3, enough users registered, DHT not already set up)
+        if (n < 3 || num_registered_peers < n || dht_already_set_up) {
+            send_failure_response();
+            continue;
         }
-    }
-    else {
+        // If all checks pass, update state of leader and select n-1 free users
+        strcpy(registered_peers[peer_index].state, "Leader");
+        // Select n-1 free users and update their states to InDHT
+
+        // Return SUCCESS with list of n peers
+        // Implement this according to the specification
+    } else {
         // Handle other types of messages here
         // For now, just echo back the message to the client
-        close(sock);
         if (sendto(sock, echoBuffer, recvMsgSize, 0, (struct sockaddr *)&echoClntAddr,
                    sizeof(echoClntAddr)) != recvMsgSize)
             DieWithError("server: sendto() sent a different number of bytes than expected");

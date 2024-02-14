@@ -35,26 +35,12 @@ struct Peer {
     char state[10]; // State of the peer: Free, Leader, InDHT
 };
 
-struct PeerTuple
-{
-    int indentifier;
-    char name[MAX_NAME_LENGTH+1];
-    char ip_address[16];
-    unsigned int p_port;
-};
-
 void DieWithError( const char *errorMessage ) // External error handling function
 {
     perror( errorMessage );
     exit(1);
 }
 
-send_id(const char *peer_name, const char *ip_address, unsigned int peer_port, int indentifier, int ring_size, const char *response)
-{
-    int send_sock;
-    struct sockaddr_in echoPeerAddr;
-    char message[MAX_MESSAGE_SIZE];
-}
 int main( int argc, char *argv[] )
 {
     size_t nread;
@@ -68,8 +54,9 @@ int main( int argc, char *argv[] )
     size_t echoStringLen = ECHOMAX;               // Length of string to echo
     int respStringLen;               // Length of received response
     char echoBuffer[ECHOMAX];
-    int n;                           //Size of ring 
+    //char message[MAX_MESSAGE_SIZE];
 
+    // echoString = (char *) malloc( ECHOMAX );
 
     if (argc < 3)    // Test for correct number of arguments
     {
@@ -139,37 +126,14 @@ int main( int argc, char *argv[] )
         }
 
         
-    }
-    else if (strcmp(command, "setup-dht") == 0) {
-        char leaderPeerName[MAX_NAME_LENGTH];
-        int year;
-
-        printf("Enter peer name: ");
-        scanf("%49s", leaderPeerName);
-        printf("Enter 'n' value: ");
-        scanf("%d", &n);
-        printf("Enter the year for data: ");
-        scanf("%d", &year);
+    } else if (strcmp(command, "setup-dht") == 0){
         
-        char message[MAX_MESSAGE_SIZE];
-        sprintf(message,"setup-dht %s %d %d", leaderPeerName, n, year);
 
-        printf(message);
-
-        if (sendto(sock, message, strlen(message), 0, (struct sockaddr *)&echoServAddr, sizeof(echoServAddr)) < 0) {
-                perror("sendto failed");
-                exit(1);
-        }
-    }
-    else if(strcmp(command, "set-id") == 0)
-    {
-
-    }
-    else if (strcmp(command, "exit") == 0) {
+    }else if (strcmp(command, "exit") == 0) {
         // If the command is "exit"
         exit(0);
     }
-     else {
+    else {
         // If the command is invalid
         printf("Invalid command.\n");
     }
@@ -184,55 +148,8 @@ int main( int argc, char *argv[] )
 
     printf("Received response from server: %s\n", echoBuffer);
 
-    char *token = strtok(echoBuffer, "\n"); //Split the response into lines
-    int i = 1; //Skip the leaders tuple, start from the second line
-    while ((token = strtok(NULL, "\n")) != NULL){
-        char peer_name[MAX_NAME_LENGTH + 1];
-        char ip_address[16];
-        unsigned int p_port;
-
-        //Parse the peer information from the token
-        sscanf(token, "%s %s %u", peer_name, ip_address, &p_port);
-
-        //Send set_id command to peer
-        set_id(peer_name, ip_address, p_port, i, n, echoBuffer);
-
-        i++;
     }
-
-    }
-	// Pass string back and forth between server ITERATIONS times
-
-	// printf( "client: Echoing strings for %d iterations\n", ITERATIONS );
-
-    // for( int i = 0; i < ITERATIONS; i++ )
-    // {
-    //     printf( "\nEnter string to echo: \n" );
-    //     if( ( nread = getline( &echoString, &echoStringLen, stdin ) ) != -1 )
-    //     {
-    //         echoString[ (int) strlen( echoString) - 1 ] = '\0'; // Overwrite newline
-    //         printf( "\nclient: reads string ``%s''\n", echoString );
-    //     }
-    //     else
-    //         DieWithError( "client: error reading string to echo\n" );
-
-    //     // Send the string to the server
-    //     if( sendto( sock, echoString, strlen( echoString ), 0, (struct sockaddr *) &echoServAddr, sizeof( echoServAddr ) ) != strlen(echoString) )
-    //    		DieWithError( "client: sendto() sent a different number of bytes than expected" );
-
-    //     // Receive a response
-    //     fromSize = sizeof( fromAddr );
-
-    //     if( ( respStringLen = recvfrom( sock, echoString, ECHOMAX, 0, (struct sockaddr *) &fromAddr, &fromSize ) ) > ECHOMAX )
-    //         DieWithError( "client: recvfrom() failed" );
-
-    //     echoString[ respStringLen ] = '\0';
-
-    //     if( echoServAddr.sin_addr.s_addr != fromAddr.sin_addr.s_addr )
-    //         DieWithError( "client: Error: received a packet from unknown source.\n" );
-
- 	// 	printf( "client: received string ``%s'' from server on IP address %s\n", echoString, inet_ntoa( fromAddr.sin_addr ) );
-    // }
+	
     
     close( sock );
     return 0;
