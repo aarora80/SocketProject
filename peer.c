@@ -24,6 +24,7 @@
 #define MANAGER_PORT 5000 // Port number for manager
 #define MAX_COMMAND_LENGTH 10
 #define MAX_MESSAGE_SIZE 256
+#define MAX_RING_SIZE 10
 
 
 struct Peer {
@@ -49,37 +50,99 @@ void DieWithError( const char *errorMessage ) // External error handling functio
     exit(1);
 }
 
-void send_id(const char *peer_name, const char *ip_address, unsigned int p_port, int identifier, int ring_size, const char *response) {
-    int sock;                         // Socket descriptor
-    struct sockaddr_in peer_addr;     // Peer address
-    char message[MAX_MESSAGE_SIZE];   // Message to send
+struct Node {
+    struct PeerTuple data;
+    struct Node* next;
+};
 
-    // Create a UDP socket
-    if ((sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+struct Node* createNode(struct PeerTuple newTuple) {
+    struct Node* newNode = (struct Node*)malloc(sizeof(struct Node));
+    if (newNode == NULL) {
+        fprintf(stderr, "Memory allocation failed.\n");
+        exit(EXIT_FAILURE);
+    }
+    newNode->data = newTuple;
+    newNode->next = NULL;
+    return newNode;
+}
+
+void freeList(struct Node* head) {
+    struct Node* current = head;
+    while (current != NULL) {
+        struct Node* temp = current;
+        current = current->next;
+        free(temp);
+    }
+}
+
+void insertEnd(struct Node** headRef, struct PeerTuple newTuple) {
+    struct Node* newNode = createNode(newTuple);
+    if (*headRef == NULL) {
+        *headRef = newNode;
+        return;
+    }
+    struct Node* current = *headRef;
+    while (current->next != NULL) {
+        current = current->next;
+    }
+    current->next = newNode;
+}
+
+void printList(struct Node* head) {
+    struct Node* current = head;
+    do {
+        printf("%s ", current->data.name);
+        current = current->next;
+    } while (current != head); // Loop until we reach the head node again
+    printf("\n");
+}
+
+// Function to make the last element of the linked list point to the head
+void makeLastPointToHead(struct Node* head) {
+    struct Node* current = head;
+    while (current->next != NULL) {
+        current = current->next;
+    }
+    current->next = head;
+}
+
+void send_id(const char *peer_name, const char *ip_address, unsigned int peer_port, int indentifier, int ring_size, const char *response)
+{
+    printf("I have entered send_id!\n");
+
+    int send_sock;
+    struct sockaddr_in echoPeerAddr;
+    struct sockaddr_in echoLeaderAddr;
+    char message[MAX_MESSAGE_SIZE];
+
+    if((send_sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP)) < 0)
+    {
         perror("socket creation failed");
         exit(EXIT_FAILURE);
     }
 
-    // Set up the peer address structure
-    memset(&peer_addr, 0, sizeof(peer_addr));
-    peer_addr.sin_family = AF_INET;
-    peer_addr.sin_port = htons(p_port);
-    if (inet_pton(AF_INET, ip_address, &peer_addr.sin_addr) <= 0) {
+    memset(&echoPeerAddr, 0, sizeof(echoPeerAddr));
+    echoPeerAddr.sin_family = AF_INET;
+    echoPeerAddr.sin_addr.s_addr = inet_addr(ip_address);
+    echoPeerAddr.sin_port = htons(peer_port);
+    if(inet_pton(AF_INET, ip_address, &echoPeerAddr.sin_addr) <=0)
+    {
         perror("invalid address");
         exit(EXIT_FAILURE);
     }
 
-    // Create the set-id command message
-    snprintf(message, sizeof(message), "set-id %s %s %d %d %s", peer_name, ip_address, p_port, identifier, response);
+    snprintf(message, sizeof(message), "set_id %s %s %u %d", peer_name, ip_address, 
+    peer_port, indentifier);
 
-    // Send the message to the peer
-    if (sendto(sock, message, strlen(message), 0, (const struct sockaddr *)&peer_addr, sizeof(peer_addr)) < 0) {
-        perror("sendto failed");
+    if(sendto(send_sock, message, strlen(message), 0, (const struct sockaddr*)&echoPeerAddr, sizeof(echoPeerAddr)) < 0)
+    {
+        perror("send failed");
         exit(EXIT_FAILURE);
     }
 
-    // Close the socket
-    close(sock);
+    printf("Message sent!\n\n");
+
+    close(send_sock);
 }
 int main( int argc, char *argv[] )
 {
@@ -95,6 +158,8 @@ int main( int argc, char *argv[] )
     int respStringLen;               // Length of received response
     char echoBuffer[ECHOMAX];
     int n;                           //Size of ring 
+    struct Peer peer;
+    struct PeerTuple ring[MAX_RING_SIZE]; 
 
 
     if (argc < 3)    // Test for correct number of arguments
@@ -136,7 +201,6 @@ int main( int argc, char *argv[] )
     // Check if the command is "register"
     if (strcmp(command, "register") == 0) {
         //printf("I have made it into register");
-        struct Peer peer;
         // If it's a registration command
         strcpy(peer.command, "register");
         printf("Enter peer name: ");
@@ -180,18 +244,59 @@ int main( int argc, char *argv[] )
         char message[MAX_MESSAGE_SIZE];
         sprintf(message,"setup-dht %s %d %d", leaderPeerName, n, year);
 
-        printf(message);
+        //printf(message);
 
         if (sendto(sock, message, strlen(message), 0, (struct sockaddr *)&echoServAddr, sizeof(echoServAddr)) < 0) {
                 perror("sendto failed");
                 exit(1);
         }
     }
+    else if(strcmp(command, "set-id") == 0)
+    {
+        int sockfd_server, sockfd_client;
+        struct sockaddr_in my_addr, client_addr;
+        char message[MAX_MSG_LENGTH];
+
+        // Create UDP socket for server
+        if ((sockfd_server = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+            perror("socket");
+            exit(1);
+        }
+
+        // Set up own address structure
+        memset(&my_addr, 0, sizeof(my_addr));
+        my_addr.sin_family = AF_INET;
+        my_addr.sin_port = htons(peer.p_port);
+        my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+        // Bind socket to the port
+        if (bind(sockfd_server, (struct sockaddr *)&my_addr, sizeof(my_addr)) == -1) {
+            perror("bind");
+            exit(1);
+        }
+
+        // Receive message from Peer 
+        printf("Waiting for message from Leader...\n");
+        socklen_t client_addr_len = sizeof(client_addr);
+        ssize_t recv_len = recvfrom(sockfd_server, message, MAX_MSG_LENGTH, 0, (struct sockaddr *)&client_addr, &client_addr_len);
+        if (recv_len == -1) {
+            perror("recvfrom");
+            exit(1);
+        }
+
+    message[recv_len] = '\0';  // Null-terminate the received message
+    printf("Received message from Leader: %s\n", message);
+
+    // Close server socket
+    close(sockfd_server);
+
+    continue;
+    }
     else if (strcmp(command, "exit") == 0) {
         // If the command is "exit"
         exit(0);
     }
-     else {
+    else {
         // If the command is invalid
         printf("Invalid command.\n");
     }
@@ -201,65 +306,72 @@ int main( int argc, char *argv[] )
     //     DieWithError("client: sendto() sent a different number of bytes than expected");
 
     // Receive a response
+    printf("waitng for response\n\n");
     if (recvfrom(sock, echoBuffer, ECHOMAX, 0, NULL, NULL) < 0)
         DieWithError("client: recvfrom() failed");
 
-   
+    printf("Received response from server: %s\n", echoBuffer);
 
-    if (strcmp(command, "set-id") == 0) {
-        // Parse the "set-id" command and its parameters
+    char *token = strtok(echoBuffer, "\n"); //Split the response into lines
+
+    // Parse the line to extract peer name, IP address, and port
+    char State[50];
+    struct Node* head = NULL;
+    sscanf(token, "%s", State);
+
+    if(strcmp(State,"Leader") == 0)
+    {
+        struct PeerTuple Leader;
+        char name[MAX_NAME_LENGTH];
+        char ip_address[16];
+        unsigned int port;
+        
+        token = strtok(NULL, "\n");
+        sscanf(token,"%s %s %u", name, ip_address, &port);
+        
+        printf("Leader Tuple: %s, %s, %u\n\n", name,ip_address,port);
+        Leader.indentifier =0;
+        strcpy(Leader.ip_address,ip_address);
+        strcpy(Leader.name,name);
+        Leader.p_port = port;
+
+        //Insert into Linked List
+        insertEnd(&head, Leader);
+    }
+    else
+    {
+        continue;
+    }
+
+    int i = 1; //Skip the leaders tuple, start from the second line
+    while ((token = strtok(NULL, "\n")) != NULL){
         char peer_name[MAX_NAME_LENGTH + 1];
         char ip_address[16];
         unsigned int p_port;
-        int identifier, ring_size;
-        char response[MAX_MESSAGE_SIZE];
-        sscanf(echoBuffer, "%s %s %s %u %d %d %[^\n]", command, peer_name, ip_address, &p_port, &identifier, &ring_size, response);
+        struct PeerTuple newTuple;
+
+        //Parse the peer information from the token
+        sscanf(token, "%s %s %u", peer_name, ip_address, &p_port);
         
-        // Call the function to handle the "set-id" command
-        //handle_set_id_command(peer_name, ip_address, p_port, identifier, ring_size, response);
+        //Send set_id command to peer
+        printf("Name: %s\nAddress: %s\nPort: %u\n",peer_name,ip_address,p_port);
+        
+        newTuple.indentifier = i;
+        strcpy(newTuple.ip_address,ip_address);
+        strcpy(newTuple.name,peer_name);
+        newTuple.p_port = p_port;
 
-        char neighbor_name[MAX_NAME_LENGTH + 1];
-        char neighbor_ip[16];
-        unsigned int neighbor_port;
-        //sscanf(echoBuffer, "%s %s %u", neighbor_name, neighbor_ip, &neighbor_port);
+        insertEnd(&head,newTuple);
+        send_id(peer_name, ip_address, p_port, i, n, token);
 
-        // Set the neighbor's information
-        set_neighbor_info(neighbor_name, neighbor_ip, neighbor_port);
+        i++;
+    }
 
-        // Print information for verification
-        printf("Assigned identifier: %d\n", identifier);
-        printf("Ring size: %d\n", ring_size);
-        printf("Neighbor: %s, IP: %s, Port: %u\n", neighbor_name, neighbor_ip, neighbor_port);
+
+    makeLastPointToHead(head);
+    printList(head);
 
     }
 
-    printf("Received response from server: %s\n", echoBuffer);
-
-    if(strncmp(echoBuffer,"SENDING", strlen("SENDING"))){
-        char *token = strtok(echoBuffer, "\n"); //Split the response into lines
-        int i = 1; //Skip the leaders tuple, start from the second line
-        while ((token = strtok(NULL, "\n")) != NULL){
-            char peer_name[MAX_NAME_LENGTH + 1];
-            char ip_address[16];
-            unsigned int p_port;
-
-            //Parse the peer information from the token
-            sscanf(token, "%s %s %u", peer_name, ip_address, &p_port);
-
-            //Send set_id command to peer
-            set_id(peer_name, ip_address, p_port, i, n, echoBuffer);
-
-            i++;
-        }
-    }
-    else if(strncmp(echoBuffer,"set-id",strlen("set-id")))
-    {
-
-    }
-
-    }
-
-    
-    close( sock );
     return 0;
 }

@@ -254,7 +254,7 @@ int main( int argc, char *argv[] )
         print_registered_peers();
 
         char response[MAX_MSG_LENGTH];
-        sprintf(response, "SENDING TUPLES\n%s %s %u\n", registered_peers[leaderIndex].name,
+        sprintf(response, "Leader\n%s %s %u\n", registered_peers[leaderIndex].name,
         registered_peers[leaderIndex].ip_address,registered_peers[leaderIndex].p_port);
 
         for(int i =0; i < n;i++)
