@@ -43,7 +43,7 @@ typedef struct {
     int deaths_indirect;
     char damage_property[20];
     int damage_crops;
-    char tor_f_scale[5];
+    //char tor_f_scale[5];
 } StormEvent;
 
 typedef struct HashNode{
@@ -185,6 +185,106 @@ void send_id(const char *peer_name, const char *ip_address, unsigned int peer_po
     printf("Message sent!\n\n");
 
     close(send_sock);
+}
+
+void send_tuple(const char *peer_name, const char *ip_address, unsigned int peer_port, int indentifier, int ring_size,  StormEvent event)
+{
+    printf("I have entered send_tuple!\n");
+
+    int send_sock;
+    struct sockaddr_in echoPeerAddr;
+    struct sockaddr_in echoLeaderAddr;
+    char message[MAX_MESSAGE_SIZE];
+
+    if((send_sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP)) < 0)
+    {
+        perror("socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    memset(&echoPeerAddr, 0, sizeof(echoPeerAddr));
+    echoPeerAddr.sin_family = AF_INET;
+    echoPeerAddr.sin_addr.s_addr = inet_addr(ip_address);
+    echoPeerAddr.sin_port = htons(peer_port);
+    if(inet_pton(AF_INET, ip_address, &echoPeerAddr.sin_addr) <=0)
+    {
+        perror("invalid address");
+        exit(EXIT_FAILURE);
+    }
+
+    // Serialize the StormEvent struct into a string representation
+    snprintf(message, sizeof(message), "store %lu,%s,%d,%s,%s,%c,%s,%d,%d,%d,%d,%s,%d", 
+            event.event_id, event.state, event.year, event.month,
+            event.event_type, event.cz_type, event.cz_name,
+            event.injuries_direct, event.injuries_indirect,
+            event.deaths_direct, event.deaths_indirect,
+            event.damage_property, event.damage_crops);
+
+    if(sendto(send_sock, message, strlen(message), 0, (const struct sockaddr*)&echoPeerAddr, sizeof(echoPeerAddr)) < 0)
+    {
+        perror("send failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Record Stored!\n\n");
+
+    close(send_sock);
+}
+
+void send_stop(const char *peer_name, const char *ip_address, unsigned int peer_port, int indentifier, int ring_size)
+{
+    printf("I have entered stop!\n");
+
+    int send_sock;
+    struct sockaddr_in echoPeerAddr;
+    struct sockaddr_in echoLeaderAddr;
+    char message[MAX_MESSAGE_SIZE];
+
+    if((send_sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP)) < 0)
+    {
+        perror("socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    memset(&echoPeerAddr, 0, sizeof(echoPeerAddr));
+    echoPeerAddr.sin_family = AF_INET;
+    echoPeerAddr.sin_addr.s_addr = inet_addr(ip_address);
+    echoPeerAddr.sin_port = htons(peer_port);
+    if(inet_pton(AF_INET, ip_address, &echoPeerAddr.sin_addr) <=0)
+    {
+        perror("invalid address");
+        exit(EXIT_FAILURE);
+    }
+
+    // Serialize the StormEvent struct into a string representation
+    snprintf(message, sizeof(message), "stop listening");
+    if(sendto(send_sock, message, strlen(message), 0, (const struct sockaddr*)&echoPeerAddr, sizeof(echoPeerAddr)) < 0)
+    {
+        perror("send failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Leader stopped sending to %s!\n\n", peer_name);
+
+    close(send_sock);
+}
+
+void printHashTable(HashNode *hash_table[], int table_size) {
+    for (int i = 0; i < table_size; i++) {
+        HashNode *current = hash_table[i];
+        printf("Bucket %d: ", i);
+        while (current != NULL) {
+            printf("(%lu, %s, %d, %s, %s, %c, %s, %d, %d, %d, %d, %s, %d) -> ", 
+                   current->data.event_id, current->data.state, current->data.year, 
+                   current->data.month, current->data.event_type, current->data.cz_type, 
+                   current->data.cz_name, current->data.injuries_direct, 
+                   current->data.injuries_indirect, current->data.deaths_direct, 
+                   current->data.deaths_indirect, current->data.damage_property, 
+                   current->data.damage_crops);
+            current = current->n;
+        }
+        printf("NULL\n");
+    }
 }
 int main( int argc, char *argv[] )
 {
@@ -329,14 +429,171 @@ int main( int argc, char *argv[] )
                 exit(1);
             }
 
-        message[recv_len] = '\0';  // Null-terminate the received message
-        printf("Received message from Leader: %s\n", message);
+            message[recv_len] = '\0';  // Null-terminate the received message
+            printf("Received message from Leader: %s\n", message);
 
-        // Close server socket
-        close(sockfd_server);
+            do {
+                // Receive message from Peer 
+                printf("Waiting for record from Leader...\n");
+                socklen_t client_addr_len = sizeof(client_addr);
+                ssize_t recv_len = recvfrom(sockfd_server, message, MAX_MSG_LENGTH, 0, (struct sockaddr *)&client_addr, &client_addr_len);
+                if (recv_len == -1) {
+                    perror("recvfrom");
+                    exit(1);
+                }
 
+                message[recv_len] = '\0';  // Null-terminate the received message
+                printf("Received record from Leader: %s\n", message);
+
+
+                //DESRALIZE AND STORE IN LOCAL HASHTABLE OF NONLEADER PEER
+                 // Extract StormEvent fields from the serialized message
+                long event_id;
+                char state[100], month[20], event_type[100], cz_name[100], damage_property[20];
+                int year, injuries_direct, injuries_indirect, deaths_direct, deaths_indirect, damage_crops;
+                char cz_type;
+
+                // Parse the message
+                if (sscanf(message, "store %lu,%99[^,],%d,%19[^,],%99[^,],%c,%99[^,],%d,%d,%d,%d,%19[^,],%d",
+                    &event_id, state, &year, month, event_type, &cz_type, cz_name,
+                    &injuries_direct, &injuries_indirect, &deaths_direct, &deaths_indirect,
+                    damage_property, &damage_crops) == 13) {
+                    printf("Parsed Correctly: %s\n", message);
+                }
+                else if(strcmp(message, "stop listening") == 0){
+                    printf("Stopped Listening: %s\n", message);
+                }
+                else{
+                     fprintf(stderr, "Failed to parse message: %s\n", message);
+                }
+
+                // Create a new HashNode
+                HashNode *new_node = (HashNode*)malloc(sizeof(HashNode));
+                if (new_node == NULL) {
+                    perror("Memory allocation failed");
+                    exit(EXIT_FAILURE);
+                }
+
+                // Fill in the StormEvent data
+                new_node->data.event_id = event_id;
+                strcpy(new_node->data.state, state);
+                new_node->data.year = year;
+                strcpy(new_node->data.month, month);
+                strcpy(new_node->data.event_type, event_type);
+                new_node->data.cz_type = cz_type;
+                strcpy(new_node->data.cz_name, cz_name);
+                new_node->data.injuries_direct = injuries_direct;
+                new_node->data.injuries_indirect = injuries_indirect;
+                new_node->data.deaths_direct = deaths_direct;
+                new_node->data.deaths_indirect = deaths_indirect;
+                strcpy(new_node->data.damage_property, damage_property);
+                new_node->data.damage_crops = damage_crops;
+
+                // Calculate hash index
+                int hash_index = event_id % 5000;
+
+                // Insert the new node into the hash table
+                new_node->n = hash_table[hash_index];
+                hash_table[hash_index] = new_node;
+
+
+                
+
+            }while(strncmp(message,"store",strlen("store")) == 0);
+
+            // Close server socket
+            close(sockfd_server);
+            printHashTable(hash_table, 20);
         continue;
         }
+        // else if(strcmp(command,"store") == 0)
+        // {
+        //         int sockfd_server, sockfd_client;
+        //         struct sockaddr_in my_addr, client_addr;
+        //         char message[MAX_MSG_LENGTH];
+
+        //         // Create UDP socket for server
+        //         if ((sockfd_server = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+        //             perror("socket");
+        //             exit(1);
+        //         }
+
+        //         // Set up own address structure
+        //         memset(&my_addr, 0, sizeof(my_addr));
+        //         my_addr.sin_family = AF_INET;
+        //         my_addr.sin_port = htons(peer.p_port);
+        //         my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+        //         // Bind socket to the port
+        //         if (bind(sockfd_server, (struct sockaddr *)&my_addr, sizeof(my_addr)) == -1) {
+        //             perror("bind");
+        //             exit(1);
+        //         }
+        //     do {
+        //         // Receive message from Peer 
+        //         printf("Waiting for record from Leader...\n");
+        //         socklen_t client_addr_len = sizeof(client_addr);
+        //         ssize_t recv_len = recvfrom(sockfd_server, message, MAX_MSG_LENGTH, 0, (struct sockaddr *)&client_addr, &client_addr_len);
+        //         if (recv_len == -1) {
+        //             perror("recvfrom");
+        //             exit(1);
+        //         }
+
+        //         message[recv_len] = '\0';  // Null-terminate the received message
+        //         printf("Received message from Leader: %s\n", message);
+
+
+        //         //DESRALIZE AND STORE IN LOCAL HASHTABLE OF NONLEADER PEER
+        //          // Extract StormEvent fields from the serialized message
+        //         long event_id;
+        //         char state[100], month[20], event_type[100], cz_name[100], damage_property[20];
+        //         int year, injuries_direct, injuries_indirect, deaths_direct, deaths_indirect, damage_crops;
+        //         char cz_type;
+
+        //         // Parse the message
+        //         if (sscanf(message, "store %lu,%99[^,],%d,%19[^,],%99[^,],%c,%99[^,],%d,%d,%d,%d,%19[^,],%d",
+        //             &event_id, state, &year, month, event_type, &cz_type, cz_name,
+        //             &injuries_direct, &injuries_indirect, &deaths_direct, &deaths_indirect,
+        //             damage_property, &damage_crops) != 13) {
+        //             fprintf(stderr, "Failed to parse message: %s\n", message);
+        //         }
+
+        //         // Create a new HashNode
+        //         HashNode *new_node = malloc(sizeof(HashNode));
+        //         if (new_node == NULL) {
+        //             perror("Memory allocation failed");
+        //             exit(EXIT_FAILURE);
+        //         }
+
+        //         // Fill in the StormEvent data
+        //         new_node->data.event_id = event_id;
+        //         strcpy(new_node->data.state, state);
+        //         new_node->data.year = year;
+        //         strcpy(new_node->data.month, month);
+        //         strcpy(new_node->data.event_type, event_type);
+        //         new_node->data.cz_type = cz_type;
+        //         strcpy(new_node->data.cz_name, cz_name);
+        //         new_node->data.injuries_direct = injuries_direct;
+        //         new_node->data.injuries_indirect = injuries_indirect;
+        //         new_node->data.deaths_direct = deaths_direct;
+        //         new_node->data.deaths_indirect = deaths_indirect;
+        //         strcpy(new_node->data.damage_property, damage_property);
+        //         new_node->data.damage_crops = damage_crops;
+
+        //         // Calculate hash index
+        //         int hash_index = event_id % 5000;
+
+        //         // Insert the new node into the hash table
+        //         new_node->n = hash_table[hash_index];
+        //         hash_table[hash_index] = new_node;
+
+
+                
+
+        //     }while(strncmp(message,"store",strlen("store")) == 0);
+        //     close(sockfd_server);
+        //     continue;
+        // }
         else if (strcmp(command, "exit") == 0) {
             // If the command is "exit"
             exit(0);
@@ -470,16 +727,22 @@ int main( int argc, char *argv[] )
             exit(EXIT_FAILURE);
         }
 
-        int count = 0;
         char c;
+        int count = 0;
+        // Skip the first line
+        while ((c = getc(file)) != '\n' && c != EOF);
 
-        for (c = getc(file); c != EOF; c = getc(file)){
+    // Extract characters from file and store in character c
+        for (c = getc(file); c != EOF; c = getc(file))
             if (c == '\n') // Increment count if this character is newline
-            {
                 count = count + 1;
-            }
-            
-        }
+
+
+        count++; //account for the last \n in the file
+
+
+
+
         
 
 
@@ -488,32 +751,67 @@ int main( int argc, char *argv[] )
         printf("the file has %d lines\n", count);
         printf("This is s: %d\n", s);
 
-        // fseek(file,0,SEEK_SET);
+        fseek(file,0,SEEK_SET);
+        char line[1024];
 
-        // fgets(line,sizeof(line), file); //Get first line to not read
-        
-        // while(fgets(line, sizeof(line), file) != NULL)
-        // {
+        // Skip the first line
+        fgets(line, 1024, file);
+        //printf("I made it past the first line\n");
+        // Read and parse each line
 
-        //     StormEvent event;
-        //     if (sscanf(line, "%d,%[^,],%d,%[^,],%[^,],%c,%[^,],%d,%d,%d,%d,%lf,%lf,%s",
-        //             &event.event_id, event.state, &event.year, event.month,
-        //             event.event_type, &event.cz_type, event.cz_name,
-        //             &event.injuries_direct, &event.injuries_indirect,
-        //             &event.deaths_direct, &event.deaths_indirect,
-        //             &event.damage_property, &event.damage_crops,
-        //             event.tor_f_scale) != 14) 
-        //     {
-        //         fprintf(stderr, "Failed to parse line: %s\n", line);
-        //         continue;
-        //     }
+        struct Node* current = head;
+        while (fgets(line, sizeof(line), file) != NULL) {
+            //printf("I made it into the while loop\n");
+            StormEvent event;
+            //Without the Fcategory at the end 
+            if (sscanf(line, "%lu,%99[^,],%d,%19[^,],%99[^,],%c,%99[^,],%d,%d,%d,%d,%19[^,],%d",
+                    &event.event_id, event.state, &event.year, event.month,
+                    event.event_type, &event.cz_type, event.cz_name,
+                    &event.injuries_direct, &event.injuries_indirect,
+                    &event.deaths_direct, &event.deaths_indirect,
+                    event.damage_property, &event.damage_crops
+                    /*event.tor_f_scale*/) != 13/*14*/) 
+            {
+                fprintf(stderr, "Failed to parse line: %s\n", line);
+                continue;
+            }
 
-        //     printf("Event ID: %lu\n", event.event_id);
+            //printf("Event ID: %lu\n", event.event_id);
 
-        // }
+
+            int pos = event.event_id % s;
+            int id = pos % n;
+
+            
+            do{
+
+                if(current->data.indentifier == id){
+                    printf("Send Record to Peer: %d\n", current->data.indentifier);
+                    send_tuple(current->data.name, current->data.ip_address, current->data.p_port, current->data.indentifier, n, event);
+                    break;
+                }
+                else{
+                    current = current->next;
+                }
+                
+            }while(current != head);
+        }
+
+        printHashTable(hash_table, 20);
+        //printf("I made it past the while loop\n");
 
         fclose(file); 
         closedir(dir);
+
+        current = head->next;
+
+        do{
+            
+            send_stop(current->data.name, current->data.ip_address, current->data.p_port, current->data.indentifier, n);
+
+            current = current->next;
+            
+        }while(current!=head);
 
     }
 
