@@ -79,14 +79,66 @@ void setRandPeerToDHT(int leader_index, int n)
 
     while(selected_count < (n-1))
     {
-        //printf("Entered for loop in rand function\n");
         int random_index = rand() % num_registered_peers;
-        //printf("random index: %d\n",random_index);
         if(random_index != leader_index && strcmp(registered_peers[random_index].state, "Free") == 0) {
             strcpy(registered_peers[random_index].state, "InDHT");
             selected_count++;
         }
     }
+}
+
+char **getHotPotato(int n) {
+    srand(time(NULL));
+    
+    // Allocate memory for the array to store peer names
+    char **hotPotatoSequence = (char **)malloc(n * sizeof(char *));
+    if (hotPotatoSequence == NULL) {
+        printf("Memory allocation failed\n");
+        exit(1); // Exit the program if memory allocation fails
+    }
+
+    // Allocate memory for each name in the array
+    for (int i = 0; i < n; i++) {
+        hotPotatoSequence[i] = (char *)malloc(50 * sizeof(char));
+        if (hotPotatoSequence[i] == NULL) {
+            printf("Memory allocation failed\n");
+            exit(1); // Exit the program if memory allocation fails
+        }
+    }
+
+    int selected_count = 0;
+    int *selected_peers = (int *)malloc(num_registered_peers * sizeof(int));
+    if (selected_peers == NULL) {
+        printf("Memory allocation failed\n");
+        exit(1); // Exit the program if memory allocation fails
+    }
+    memset(selected_peers, 0, num_registered_peers * sizeof(int)); // Initialize all elements to 0
+
+    while (selected_count < n) {
+        char result[100];
+        memset(result, 0, sizeof(result));
+        char port[10];
+        int random_index = rand() % num_registered_peers;
+        if ((strcmp(registered_peers[random_index].state, "InDHT") == 0 || strcmp(registered_peers[random_index].state, "Leader") == 0)
+            &&selected_peers[random_index] == 0) {
+            printf("Selected peer: %s\n", registered_peers[random_index].name);
+            // Copy the name of the peer to the hotPotatoSequence array
+            strcat(result, registered_peers[random_index].name);
+            strcat(result, ",");
+            strcat(result, registered_peers[random_index].ip_address);
+            strcat(result, ",");
+            sprintf(port, "%d\n", registered_peers[random_index].p_port); // Convert integer to string
+            strcat(result, port);
+            strcpy(hotPotatoSequence[selected_count], result);
+            selected_peers[random_index] = 1; // Mark this peer as selected
+            selected_count++;
+            printf("This is selected count: %d\n", selected_count);
+        }
+    }
+
+    //free(selected_peers); // Free memory allocated for selected_peers array
+    printf("successfully freed \n\n");
+    return hotPotatoSequence;
 }
     
 
@@ -161,6 +213,7 @@ int main( int argc, char *argv[] )
     unsigned short echoServPort;     // Server port
     int recvMsgSize;                 // Size of received message
     int isDHTComplete;               // Check if table is complete 
+    int n;                           // Ring size
 
     if( argc != 2 )         // Test for correct number of parameters
     {
@@ -188,16 +241,45 @@ int main( int argc, char *argv[] )
 
     for (;;) { // Run forever
     cliAddrLen = sizeof(echoClntAddr);
-
+    
+    memset(echoBuffer, 0, sizeof(echoBuffer));
     // Block until receive message from a client
     if ((recvMsgSize = recvfrom(sock, echoBuffer, ECHOMAX, 0, (struct sockaddr *)&echoClntAddr, &cliAddrLen)) < 0)
         DieWithError("server: recvfrom() failed");
 
     echoBuffer[recvMsgSize] = '\0';
 
-    //printf("server: received string ``%s'' from client on IP address %s\n", echoBuffer, inet_ntoa(echoClntAddr.sin_addr));
+    if(strncmp(echoBuffer,"find-event",strlen("find-event")) == 0)
+    {
+        printf("Received message from free peer to find event id\n");
+        char response[MAX_MSG_LENGTH];
+        char **hotPotatoSequence = getHotPotato(n);
 
-    // Extract and print peer information
+        // Accessing elements of the returned array
+        printf("Hot Potato Sequence:\n");
+        sprintf(response, "%s\n", hotPotatoSequence[0]);
+        for (int i = 1; i < n; i++) {
+            sprintf(response + strlen(response), "%s", hotPotatoSequence[i]);
+        }
+        printf("\n");
+
+        if(sendto(sock,response,strlen(response),0, 
+        (struct sockaddr*)&echoClntAddr, sizeof(echoClntAddr)) != strlen(response))
+        {
+            DieWithError("Response did not work");
+        }
+
+
+        // //Free the memory allocated for each name in the array
+        // for (int i = 0; i < n; i++) {
+        //     free(hotPotatoSequence[i]);
+        // }
+        // // Free the memory allocated for the array itself
+        // free(hotPotatoSequence);
+    }
+
+    printf("Recieved: %s\n\n\n\n", echoBuffer);
+
     if(strncmp(echoBuffer,"register",strlen("register")) == 0){
     
         char command[10];
@@ -222,7 +304,6 @@ int main( int argc, char *argv[] )
     {
         char command[10];
         char peer_name[MAX_NAME_LENGTH+1];
-        int n;
         int year;
 
         sscanf(echoBuffer, "%9s %49s %d %d", command, peer_name, &n, &year);
@@ -278,22 +359,20 @@ int main( int argc, char *argv[] )
     else if(strncmp(echoBuffer,"dht-complete", strlen("dht-complete")) == 0)
     {
         isDHTComplete =1;
-        if (sendto(sock, echoBuffer, recvMsgSize, 0, (struct sockaddr *)&echoClntAddr,
-                   sizeof(echoClntAddr)) != recvMsgSize)
-            DieWithError("server: sendto() sent a different number of bytes than expected");
         
         printf("Success! DHT is now setup\n");
+
+        // Send success response to the peer
+        sendto(sock, "SUCCESS!", strlen("SUCCESS"), 0, (struct sockaddr *) &echoClntAddr, sizeof(echoClntAddr));
     }
     else if(strncmp(echoBuffer,"find-event",strlen("find-event")) == 0)
     {
-        long event_id;
-        sscanf(echoBuffer, "%lu", event_id);
-
-        printf("Received message from free peer to find event id: %lu", event_id);
+        continue;
     }
     else {
         // Handle other types of messages here
         // For now, just echo back the message to the client
+        printf("I entered else!!! \n\n\n");
         close(sock);
         if (sendto(sock, echoBuffer, recvMsgSize, 0, (struct sockaddr *)&echoClntAddr,
                    sizeof(echoClntAddr)) != recvMsgSize)

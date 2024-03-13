@@ -326,6 +326,25 @@ void printHashTable(HashNode *hash_table[], int table_size) {
         printf("NULL\n");
     }
 }
+int searchHashTable(long event_id)
+{
+    for (int i = 0; i < 5000; i++) 
+    {
+        HashNode *current = hash_table[i];
+        if(current->data.event_id == event_id)
+        {
+            return 1;
+        }
+        else
+        {
+            continue;
+        }
+
+    }
+
+    return 0;
+
+}
 int main( int argc, char *argv[] )
 {
     size_t nread;
@@ -370,7 +389,7 @@ int main( int argc, char *argv[] )
     echoServAddr.sin_port = htons( echoServPort );      // Set server's port
   
     while(1){
-
+        memset(echoBuffer, 0, sizeof(echoBuffer));
         printf("Enter a command: ");
             char command[20];
             if (scanf("%19s", command) != 1) {
@@ -471,6 +490,7 @@ int main( int argc, char *argv[] )
             //Free state peers will stop listening 
             if(strcmp(message, "stop listening") == 0)
             {
+                close(sockfd_server);
                 continue;
             }
 
@@ -545,6 +565,8 @@ int main( int argc, char *argv[] )
 
             // Close server socket
             close(sockfd_server);
+
+
             continue;
         }
         else if(strcmp(command, "dht-complete") == 0)
@@ -569,7 +591,13 @@ int main( int argc, char *argv[] )
                     perror("sendto failed");
                     exit(1);
             }
-            
+
+            if (recvfrom(sock, echoBuffer, ECHOMAX, 0, NULL, NULL) < 0)
+                DieWithError("client: recvfrom() failed");
+
+            printf("Received response from server: %s\n", echoBuffer);
+
+            continue;
         }
         else if (strcmp(command, "query-dht") == 0)
         {
@@ -596,27 +624,141 @@ int main( int argc, char *argv[] )
             {
                     perror("sendto failed");
                     exit(1);
-            }            
+            } 
+
+            if (recvfrom(sock, echoBuffer, ECHOMAX, 0, NULL, NULL) < 0)
+                DieWithError("client: recvfrom() failed");
+
+            printf("Received response from server: %s\n", echoBuffer);
+
+            int send_sock;
+            struct sockaddr_in echoPeerAddr;
+            struct sockaddr_in echoFreeAddr;
+            char event_find[MAX_MESSAGE_SIZE];
+
+            if((send_sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP)) < 0)
+            {
+                perror("socket creation failed");
+                exit(EXIT_FAILURE);
+            }
+
+            //Extract sending info
+            char hot_potato[MAX_MSG_LENGTH];
+            strcpy(hot_potato, echoBuffer);
+            char *token = strtok(echoBuffer, "\n"); 
+          
+            char peer_name[MAX_NAME_LENGTH + 1];
+            char ip_address[16];
+            char p_port[10];
+
+            //Parse the peer information from the token
+            // Skip leading whitespace, if any
+            while (*token == ' ' || *token == '\t')
+                token++;
+
+            printf("token: %s\n", token);
+            // Parse the peer information from the token
+            sscanf(token, "%[^,],%15[^,],%s", peer_name, ip_address, p_port);
+
+
+
+            memset(&echoPeerAddr, 0, sizeof(echoPeerAddr));
+            echoPeerAddr.sin_family = AF_INET;
+            echoPeerAddr.sin_addr.s_addr = inet_addr(ip_address);
+            int peer_port = atoi(p_port);
+            echoPeerAddr.sin_port = htons(peer_port);
+            if(inet_pton(AF_INET, ip_address, &echoPeerAddr.sin_addr) <=0)
+            {
+                perror("invalid address");
+                exit(EXIT_FAILURE);
+            }
+
+            // Copy the  message 
+            snprintf(event_find, sizeof(event_find), "%lu, %s", event_id, hot_potato);
+            //send the tuple and the find event 
+            if(sendto(send_sock, event_find, strlen(event_find), 0, (const struct sockaddr*)&echoPeerAddr, sizeof(echoPeerAddr)) < 0)
+            {
+                perror("send failed");
+                exit(EXIT_FAILURE);
+            }
+            
+            continue;           
         }
         else if(strcmp(command, "find-event") == 0)
         {
+                        
+            // Receive message from Peer 
+            printf("Finding Event...\n");
             /*
             Find event is running the hot potato protocol
             */
             int sockfd_server, sockfd_client;
             struct sockaddr_in my_addr, client_addr;
             char message[MAX_MSG_LENGTH];
+            char event[20];
+            long event_id;
 
-            // Create UDP socket for peer
+            // Create UDP socket for server
             if ((sockfd_server = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
                 perror("socket");
                 exit(1);
             }
-            
-            // Receive message from Peer 
-            printf("Finding Event...\n");
 
-            close(sockfd_server);
+            // Set up own address structure
+            memset(&my_addr, 0, sizeof(my_addr));
+            my_addr.sin_family = AF_INET;
+            my_addr.sin_port = htons(peer.p_port);
+            my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+            // Bind socket to the port
+            if (bind(sockfd_server, (struct sockaddr *)&my_addr, sizeof(my_addr)) == -1) {
+                perror("bind");
+                exit(1);
+            }
+
+            // Receive message from Peer 
+            printf("Waiting for message from Free Peer...\n");
+            socklen_t client_addr_len = sizeof(client_addr);
+            ssize_t recv_len = recvfrom(sockfd_server, message, MAX_MSG_LENGTH, 0, (struct sockaddr *)&client_addr, &client_addr_len);
+            if (recv_len == -1) {
+                perror("recvfrom");
+                exit(1);
+            }
+
+            message[recv_len] = '\0';  // Null-terminate the received message
+            printf("Received message from Free Peer: %s\n", message);
+
+            printf("PARSING:");
+            //parse message
+
+            // char *token = strtok(message, ",");
+
+            // // Parse the event ID from the input string
+            if (sscanf(message, "%19[^,],", event) != 1) { // Adjust buffer size
+                printf("Error: Failed to parse event ID.\n");
+                //exit(1);
+            }
+
+            printf("Event ID string: %s\n", event);
+
+            // printf("This is token: %s", token);
+
+            printf("AFTER SCANNING EVENTID");
+
+            //event_id = strtol(event,NULL,10);
+
+            printf("AFTER CONVERTING EVENTID TO LONG");
+
+            printf("This is the eventid: %ld",event_id);
+
+            // if(searchHashTable(event_id))
+            // {
+            //     printf("ID FOUND!!");
+            // }
+            // else
+            // {
+            //     printf("Keep searching");
+            // }
 
         }
         else if (strcmp(command, "exit") == 0) {
@@ -675,6 +817,7 @@ int main( int argc, char *argv[] )
         }
 
         //Create the ring and store it in linked list 
+        
         
         int i = 1; //Skip the leaders tuple, start from the second line
         
