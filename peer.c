@@ -683,7 +683,7 @@ int main( int argc, char *argv[] )
         }
         else if(strcmp(command, "find-event") == 0)
         {
-                        
+            
             // Receive message from Peer 
             printf("Finding Event...\n");
             /*
@@ -691,7 +691,9 @@ int main( int argc, char *argv[] )
             */
             int sockfd_server, sockfd_client;
             struct sockaddr_in my_addr, client_addr;
-            char message[MAX_MSG_LENGTH];
+            char message2[MAX_MSG_LENGTH];
+            char new_hotPotato[MAX_MSG_LENGTH];
+            char new_newhotPotato[MAX_MSG_LENGTH];
             char event[20];
             long event_id;
 
@@ -716,43 +718,97 @@ int main( int argc, char *argv[] )
             // Receive message from Peer 
             printf("Waiting for message from Free Peer...\n");
             socklen_t client_addr_len = sizeof(client_addr);
-            ssize_t recv_len = recvfrom(sockfd_server, message, MAX_MSG_LENGTH, 0, (struct sockaddr *)&client_addr, &client_addr_len);
+            ssize_t recv_len = recvfrom(sockfd_server, message2, MAX_MSG_LENGTH, 0, (struct sockaddr *)&client_addr, &client_addr_len);
             if (recv_len == -1) {
                 perror("recvfrom");
                 exit(1);
             }
 
-            message[recv_len] = '\0';  // Null-terminate the received message
-            printf("Received message from Free Peer: %s\n", message);
+            message2[recv_len] = '\0';  // Null-terminate the received message
+            printf("Received message from Free Peer: %s", message2);
 
             printf("PARSING:\n");
             //parse message
 
 
             // // Parse the event ID from the input string
-            if (sscanf(message, "%19[^,],", event) != 1) { // Adjust buffer size
+            if (sscanf(message2, "%19[^,],", event) != 1) { // Adjust buffer size
                 printf("Error: Failed to parse event ID.\n");
                 //exit(1);
             }
-
-            printf("Event ID string: %s\n", event);
-
-
-            printf("AFTER SCANNING EVENTID\n");
-
             event_id = strtol(event,NULL,10);
-
-            printf("AFTER CONVERTING EVENTID TO LONG\n");
 
             printf("This is the eventid: %ld\n",event_id);
 
             if(searchHashTable(hash_table,event_id))
             {
-                printf("ID FOUND!!\n");
+                printf("Success ID FOUND!!\n");
+                continue;
             }
             else
             {
+                char *token = strtok(message2, ",");
+                //Skip first line 
+                token = strtok(NULL, "\n");
+                printf("This the first tuple: %s\n", token );
+                memset(new_hotPotato, '\0', sizeof(new_hotPotato));
+                printf("This is newHotPotato before the while: %s\n",new_hotPotato);
+        
+                while((token = strtok(NULL, "\n")) != NULL)
+                {
+                    printf("This is what the token is: %s\n", token);
+                    strcat(new_hotPotato, token);
+                    strcat(new_hotPotato, "\n");
+                    printf("This is newHotPotato during the while: %s\n",new_hotPotato);
+                }
+
+                printf("This is the new hot potato message:%s\n", new_hotPotato);
                 printf("Keep searching\n");
+
+                int send_hot;
+                struct sockaddr_in echoPeerAddr;
+
+                //Get the first line 
+                strcat(event, new_hotPotato);
+                strcpy(new_newhotPotato,event);
+                char *token2 = strtok(new_hotPotato, "\n"); 
+          
+                char peer_name[MAX_NAME_LENGTH + 1];
+                char ip_address[16];
+                char p_port[10];
+
+                //Parse the peer information from the token
+                // Skip leading whitespace, if any
+                while (*token2 == ' ' || *token2 == '\t')
+                    token2++;
+
+                printf("token2: %s\n", token2);
+                // Parse the peer information from the token
+                sscanf(token2, "%[^,],%15[^,],%s", peer_name, ip_address, p_port);
+
+                if((send_hot = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP)) < 0)
+                {
+                    perror("socket creation failed");
+                    exit(EXIT_FAILURE);
+                }
+
+                memset(&echoPeerAddr, 0, sizeof(echoPeerAddr));
+                echoPeerAddr.sin_family = AF_INET;
+                echoPeerAddr.sin_addr.s_addr = inet_addr(ip_address);
+                int new_peer_port = atoi(p_port);
+                echoPeerAddr.sin_port = htons(new_peer_port);
+                if(inet_pton(AF_INET, ip_address, &echoPeerAddr.sin_addr) <=0)
+                {
+                    perror("invalid address");
+                    exit(EXIT_FAILURE);
+                }
+
+                if(sendto(send_hot, new_newhotPotato, strlen(new_newhotPotato), 0, (const struct sockaddr*)&echoPeerAddr, sizeof(echoPeerAddr)) < 0)
+                {
+                perror("send failed");
+                exit(EXIT_FAILURE);
+                }
+                continue;
             }
 
         }
