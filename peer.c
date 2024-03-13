@@ -326,22 +326,19 @@ void printHashTable(HashNode *hash_table[], int table_size) {
         printf("NULL\n");
     }
 }
-int searchHashTable(long event_id)
+int searchHashTable(HashNode *hash_table[],long event_id)
 {
     for (int i = 0; i < 5000; i++) 
     {
         HashNode *current = hash_table[i];
-        if(current->data.event_id == event_id)
-        {
-            return 1;
+        // Check if current is NULL before accessing its data member
+        while (current != NULL) {
+            if (current->data.event_id == event_id) {
+                return 1; // Event ID found
+            }
+            current = current->n; // Move to the next node in the linked list (if any)
         }
-        else
-        {
-            continue;
-        }
-
     }
-
     return 0;
 
 }
@@ -728,10 +725,9 @@ int main( int argc, char *argv[] )
             message[recv_len] = '\0';  // Null-terminate the received message
             printf("Received message from Free Peer: %s\n", message);
 
-            printf("PARSING:");
+            printf("PARSING:\n");
             //parse message
 
-            // char *token = strtok(message, ",");
 
             // // Parse the event ID from the input string
             if (sscanf(message, "%19[^,],", event) != 1) { // Adjust buffer size
@@ -741,24 +737,23 @@ int main( int argc, char *argv[] )
 
             printf("Event ID string: %s\n", event);
 
-            // printf("This is token: %s", token);
 
-            printf("AFTER SCANNING EVENTID");
+            printf("AFTER SCANNING EVENTID\n");
 
-            //event_id = strtol(event,NULL,10);
+            event_id = strtol(event,NULL,10);
 
-            printf("AFTER CONVERTING EVENTID TO LONG");
+            printf("AFTER CONVERTING EVENTID TO LONG\n");
 
-            printf("This is the eventid: %ld",event_id);
+            printf("This is the eventid: %ld\n",event_id);
 
-            // if(searchHashTable(event_id))
-            // {
-            //     printf("ID FOUND!!");
-            // }
-            // else
-            // {
-            //     printf("Keep searching");
-            // }
+            if(searchHashTable(hash_table,event_id))
+            {
+                printf("ID FOUND!!\n");
+            }
+            else
+            {
+                printf("Keep searching\n");
+            }
 
         }
         else if (strcmp(command, "exit") == 0) {
