@@ -306,6 +306,11 @@ int main( int argc, char *argv[] )
         char peer_name[MAX_NAME_LENGTH+1];
         int year;
 
+        for(int i=0; i < num_registered_peers; i++)
+        {
+            strcpy(registered_peers[i].state, "Free");
+        }
+
         sscanf(echoBuffer, "%9s %49s %d %d", command, peer_name, &n, &year);
 
         printf("Recieved %s %d %d \n", peer_name, n, year);
@@ -323,7 +328,7 @@ int main( int argc, char *argv[] )
             DieWithError("Peer not registered");
         }
 
-        if(n > num_registered_peers || isDHTComplete == 1 || n < 3)
+        if(n > num_registered_peers || isDHTComplete == 1 || n < 2)
         {
             DieWithError("Failure");
         }
@@ -367,6 +372,12 @@ int main( int argc, char *argv[] )
     }
     else if(strncmp(echoBuffer,"find-event",strlen("find-event")) == 0)
     {
+        continue;
+    }
+    else if(strncmp(echoBuffer,"Teardown",strlen("Teardown")) == 0)
+    {
+        sendto(sock, "SUCCESS!", strlen("SUCCESS"), 0, (struct sockaddr *) &echoClntAddr, sizeof(echoClntAddr));
+        isDHTComplete=0;
         continue;
     }
     else {

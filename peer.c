@@ -54,6 +54,7 @@ typedef struct HashNode{
 
 //Local Hash table of Peer
 HashNode *hash_table[5000] = {NULL};
+struct Node* head = NULL;
 
 struct Peer {
     char command[MAX_COMMAND_LENGTH + 1]; // Command string
@@ -144,6 +145,57 @@ void printList(struct Node* head) {
         current = current->next;
     } while (current != head); // Loop until we reach the head node again
     printf("\n");
+}
+
+void teardown_DHT(struct Node* head)
+{
+    struct Node* current = head;
+    do {
+        int send_sock;
+        struct sockaddr_in echoPeerAddr;
+        struct sockaddr_in echoLeaderAddr;
+        char message[MAX_MESSAGE_SIZE];
+
+        if((send_sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP)) < 0)
+        {
+            perror("socket creation failed");
+            exit(EXIT_FAILURE);
+        }
+
+        memset(&echoPeerAddr, 0, sizeof(echoPeerAddr));
+        echoPeerAddr.sin_family = AF_INET;
+        echoPeerAddr.sin_addr.s_addr = inet_addr(current->data.ip_address);
+        echoPeerAddr.sin_port = htons(current->data.p_port);
+        if(inet_pton(AF_INET, current->data.ip_address, &echoPeerAddr.sin_addr) <=0)
+        {
+            perror("invalid address");
+            exit(EXIT_FAILURE);
+        }
+        memset(&message, 0, sizeof(message));
+        sprintf(message, "Teardown local hash\nReset ID\n");
+
+        if(sendto(send_sock, message, strlen(message), 0, (const struct sockaddr*)&echoPeerAddr, sizeof(echoPeerAddr)) < 0)
+        {
+            perror("send failed");
+            exit(EXIT_FAILURE);
+        }
+
+        close(send_sock);
+        current = current->next;
+    } while (current != head);
+}
+
+// Function to delete the hash table
+void deleteHashTable() {
+    for (int i = 0; i < 5000; i++) {
+        HashNode *current = hash_table[i];
+        while (current != NULL) {
+            HashNode *temp = current;
+            current = current->n;
+            free(temp); // Free memory for the node
+        }
+        hash_table[i] = NULL; // Set the table entry to NULL
+    }
 }
 
 // Function to make the last element of the linked list point to the head
@@ -490,8 +542,93 @@ int main( int argc, char *argv[] )
                 close(sockfd_server);
                 continue;
             }
+            if(strncmp(message, "Teardown", strlen("Teardown")) == 0)
+            {
+                deleteHashTable();
+                if(strcmp(peer.name,"B") == 0)
+                {
+                  char message2[MAX_MESSAGE_SIZE];
+                  sprintf(message,"setup-dht %s %d %d", "B", 2, 1950);
+                    if (sendto(sock, message, strlen(message), 0, (struct sockaddr *)&echoServAddr, sizeof(echoServAddr)) < 0) {
+                            perror("sendto failed");
+                            exit(1);
+                    }
+                }
+                else
+                {
+                    do {
+                // Receive message from Peer 
+                printf("Waiting for record from Leader...\n");
+                socklen_t client_addr_len = sizeof(client_addr);
+                ssize_t recv_len = recvfrom(sockfd_server, message, MAX_MSG_LENGTH, 0, (struct sockaddr *)&client_addr, &client_addr_len);
+                if (recv_len == -1) {
+                    perror("recvfrom");
+                    exit(1);
+                }
 
-            do {
+                message[recv_len] = '\0';  // Null-terminate the received message
+                printf("Received record from Leader: %s\n", message);
+
+
+                //DESRALIZE AND STORE IN LOCAL HASHTABLE OF NONLEADER PEER
+                 // Extract StormEvent fields from the serialized message
+                long event_id;
+                char state[100], month[20], event_type[100], cz_name[100], damage_property[20];
+                int year, injuries_direct, injuries_indirect, deaths_direct, deaths_indirect, damage_crops;
+                char cz_type;
+
+                // Parse the message
+                if (sscanf(message, "store %lu,%99[^,],%d,%19[^,],%99[^,],%c,%99[^,],%d,%d,%d,%d,%19[^,],%d",
+                    &event_id, state, &year, month, event_type, &cz_type, cz_name,
+                    &injuries_direct, &injuries_indirect, &deaths_direct, &deaths_indirect,
+                    damage_property, &damage_crops) == 13) {
+                    printf("Parsed Correctly: %s\n", message);
+                }
+                else if(strcmp(message, "stop listening") == 0){
+                    printf("Stopped Listening: %s\n", message);
+                }
+                else{
+                     fprintf(stderr, "Failed to parse message: %s\n", message);
+                }
+
+                // Create a new HashNode
+                HashNode *new_node = (HashNode*)malloc(sizeof(HashNode));
+                if (new_node == NULL) {
+                    perror("Memory allocation failed");
+                    exit(EXIT_FAILURE);
+                }
+
+                // Fill in the StormEvent data
+                new_node->data.event_id = event_id;
+                strcpy(new_node->data.state, state);
+                new_node->data.year = year;
+                strcpy(new_node->data.month, month);
+                strcpy(new_node->data.event_type, event_type);
+                new_node->data.cz_type = cz_type;
+                strcpy(new_node->data.cz_name, cz_name);
+                new_node->data.injuries_direct = injuries_direct;
+                new_node->data.injuries_indirect = injuries_indirect;
+                new_node->data.deaths_direct = deaths_direct;
+                new_node->data.deaths_indirect = deaths_indirect;
+                strcpy(new_node->data.damage_property, damage_property);
+                new_node->data.damage_crops = damage_crops;
+
+                // Calculate hash index
+                int hash_index = event_id % 5000;
+
+                // Insert the new node into the hash table
+                new_node->n = hash_table[hash_index];
+                hash_table[hash_index] = new_node;
+
+
+                
+
+                }while(strncmp(message,"store",strlen("store")) == 0);
+            }
+        }
+            else
+            {
+                do {
                 // Receive message from Peer 
                 printf("Waiting for record from Leader...\n");
                 socklen_t client_addr_len = sizeof(client_addr);
@@ -559,12 +696,10 @@ int main( int argc, char *argv[] )
                 
 
             }while(strncmp(message,"store",strlen("store")) == 0);
-
             // Close server socket
             close(sockfd_server);
-
-
             continue;
+            }
         }
         else if(strcmp(command, "dht-complete") == 0)
         {
@@ -812,6 +947,90 @@ int main( int argc, char *argv[] )
             }
 
         }
+        else if(strcmp(command, "teardown-dht") == 0)
+        {
+            teardown_DHT(head);
+            printf("Teardown Complete sent to manager!!!\n");
+            char message[MAX_MSG_LENGTH];
+            deleteHashTable();
+            sprintf(message, "Teardown Complete!!!\n");
+            if (sendto(sock, message, strlen(message), 0, (struct sockaddr *)&echoServAddr, 
+            sizeof(echoServAddr)) < 0) 
+            {
+                    perror("sendto failed");
+                    exit(1);
+            } 
+            continue;
+        }
+        else if(strcmp(command, "leave-dht") == 0)
+        {
+            printf("Teardown Complete sent to manager!!!\n");
+            char message[MAX_MSG_LENGTH];
+            deleteHashTable();
+            sprintf(message, "Teardown Complete!!!\n");
+            if (sendto(sock, message, strlen(message), 0, (struct sockaddr *)&echoServAddr, 
+            sizeof(echoServAddr)) < 0) 
+            {
+                    perror("sendto failed");
+                    exit(1);
+            } 
+
+            printf("waitng for response!!!\n\n");
+            if (recvfrom(sock, echoBuffer, ECHOMAX, 0, NULL, NULL) < 0)
+                DieWithError("client: recvfrom() failed");
+
+            printf("Received response from server: %s\n", echoBuffer);
+
+            teardown_DHT(head);
+            continue;
+        }
+        else if(strcmp(command, "reset-id") == 0)
+        {
+            /*
+            Command to set id of peers
+            None leader peer enters this command to wait for set-id message from Leader
+            */
+            int sockfd_server, sockfd_client;
+            struct sockaddr_in my_addr, client_addr;
+            char message[MAX_MSG_LENGTH];
+
+            // Create UDP socket for server
+            if ((sockfd_server = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+                perror("socket");
+                exit(1);
+            }
+
+            // Set up own address structure
+            memset(&my_addr, 0, sizeof(my_addr));
+            my_addr.sin_family = AF_INET;
+            my_addr.sin_port = htons(peer.p_port);
+            my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+            // Bind socket to the port
+            if (bind(sockfd_server, (struct sockaddr *)&my_addr, sizeof(my_addr)) == -1) {
+                perror("bind");
+                exit(1);
+            }
+            memset(&message, 0, sizeof(message));
+            // Receive message from Peer 
+            printf("Waiting for teardown message from Peer...\n");
+            socklen_t client_addr_len = sizeof(client_addr);
+            ssize_t recv_len = recvfrom(sockfd_server, message, MAX_MSG_LENGTH, 0, (struct sockaddr *)&client_addr, &client_addr_len);
+            if (recv_len == -1) {
+                perror("recvfrom");
+                exit(1);
+            }
+
+            printf("Received message: %s", message);
+
+            deleteHashTable();
+
+            printHashTable(hash_table,5000);
+            printf("Hash Table deleted!!!\n");
+
+            close(sockfd_server);
+            continue;
+        }
         else if (strcmp(command, "exit") == 0) {
             // If the command is "exit"
             exit(0);
@@ -836,7 +1055,6 @@ int main( int argc, char *argv[] )
 
         // Parse the line to extract peer name, IP address, and port
         char State[50];
-        struct Node* head = NULL;
         sscanf(token, "%s", State);
 
         //If peer is not Leader than continue back to beginning of while loop
@@ -869,7 +1087,7 @@ int main( int argc, char *argv[] )
 
         //Create the ring and store it in linked list 
         
-        
+        year = 1950;
         int i = 1; //Skip the leaders tuple, start from the second line
         
         while ((token = strtok(NULL, "\n")) != NULL){
