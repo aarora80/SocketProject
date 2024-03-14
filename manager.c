@@ -308,7 +308,9 @@ int main( int argc, char *argv[] )
 
         for(int i=0; i < num_registered_peers; i++)
         {
-            strcpy(registered_peers[i].state, "Free");
+            if(strcmp(registered_peers[i].state,"Leader")== 0){
+                strcpy(registered_peers[i].state, "Free");
+            }
         }
 
         sscanf(echoBuffer, "%9s %49s %d %d", command, peer_name, &n, &year);
@@ -335,7 +337,10 @@ int main( int argc, char *argv[] )
 
         strcpy(registered_peers[peerExists(peer_name)].state, "Leader");
 
-        setRandPeerToDHT(leaderIndex, n);
+        if(strcmp(registered_peers[0].state,"Leader")==0){
+            setRandPeerToDHT(leaderIndex, n);
+        }
+        
         
         print_registered_peers();
 

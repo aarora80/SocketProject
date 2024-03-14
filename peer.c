@@ -1100,8 +1100,9 @@ int main( int argc, char *argv[] )
             //Parse the peer information from the token
             sscanf(token, "%s %s %u %s", peer_name, ip_address, &p_port, p_state);
 
-            if(strcmp(p_state, "Free") == 0)
+            if((strcmp(p_state, "Free") == 0))
             {
+
                 send_stop(peer_name, ip_address, p_port);
                 continue;
             }
@@ -1116,9 +1117,24 @@ int main( int argc, char *argv[] )
             newTuple.record_size = 0;
 
             insertEnd(&head,newTuple);
-            send_id(peer_name, ip_address, p_port,p_state, i, n, token);
+            if(strcmp(peer.name,"B")!=0){
+                send_id(peer_name, ip_address, p_port,p_state, i, n, token);
+            }
+            else{
+                if(strcmp(p_state,"InDHT")==0){
+                    struct Node *current = head;
+                    while(current != NULL){
+                        if(strcmp(current->data.name,peer_name)==0){
+                            current->data.indentifier=i;
+                        }
+                        current = current->next;
+                    }
+                }
+            }
+            
 
             i++;
+            
         }
 
         //Make linked list a cycle
@@ -1172,6 +1188,7 @@ int main( int argc, char *argv[] )
 
         }
 
+        
 
         //----------------------- Storm Event Computing ------------------------
         FILE *file = fopen(filename,"r");
@@ -1193,6 +1210,9 @@ int main( int argc, char *argv[] )
         }
 
         //Determine the first prime number that is twice the line count 
+        if(strcmp(peer.name,"B")==0){
+            n = 2;
+        }
 
         int s = find_prime(count);
         printf("the file has %d lines\n", count);
@@ -1201,6 +1221,7 @@ int main( int argc, char *argv[] )
         char line[1024];
 
         struct Node* current = head;
+        
         while (fgets(line, sizeof(line), file) != NULL) {
             StormEvent event;
             //Without the Fcategory at the end 
@@ -1209,7 +1230,7 @@ int main( int argc, char *argv[] )
                     event.event_type, &event.cz_type, event.cz_name,
                     &event.injuries_direct, &event.injuries_indirect,
                     &event.deaths_direct, &event.deaths_indirect,
-                    event.damage_property, &event.damage_crops
+                    event.damage_property, &event.damage_crops  
                     /*event.tor_f_scale*/) != 13/*14*/) 
             {
                 fprintf(stderr, "Failed to parse line: %s\n", line);
